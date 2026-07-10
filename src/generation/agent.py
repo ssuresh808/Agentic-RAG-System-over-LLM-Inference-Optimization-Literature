@@ -64,9 +64,7 @@ AGENT_INSTRUCTIONS = (
 )
 
 
-def _make_search_tool(
-    engine: RetrievalEngine, top_k: int, collected: list[Document]
-) -> BaseTool:
+def _make_search_tool(engine: RetrievalEngine, top_k: int, collected: list[Document]) -> BaseTool:
     """Build a retrieval tool bound to ``engine`` that records what it returns.
 
     Args:
@@ -130,6 +128,51 @@ def build_react_agent(tools: list[BaseTool], settings: Settings | None = None) -
     )
 
 
+def _dedupe_documents(documents: list[Document]) -> list[Document]:
+    """Drop repeated chunks (same source and content), preserving order.
+
+    Args:
+        documents: Retrieved chunks, possibly overlapping across searches.
+
+    Returns:
+        The unique chunks in first-seen order.
+    """
+    seen: set[tuple[str, str]] = set()
+    unique: list[Document] = []
+    for doc in documents:
+        key = (str(doc.metadata.get("source")), doc.page_content)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(doc)
+    return unique
+
+
+def _cited_documents(answer: str, documents: list[Document]) -> list[Document]:
+    """Keep only the chunks whose source id the answer actually cites.
+
+    A source counts as cited when its full id (``arxiv:2601.12345``) or bare id
+    (``2601.12345``) appears in the answer text. If no source matches (e.g. the
+    model paraphrased without ids), all documents are kept so citations never
+    silently vanish.
+
+    Args:
+        answer: The agent's final answer text.
+        documents: Deduplicated retrieved chunks.
+
+    Returns:
+        The chunks backing the answer, or ``documents`` unchanged if the answer
+        cites none of them.
+    """
+    cited: list[Document] = []
+    for doc in documents:
+        source = str(doc.metadata.get("source") or "")
+        bare_id = source.split(":", 1)[-1]
+        if source and (source in answer or (bare_id and bare_id in answer)):
+            cited.append(doc)
+    return cited or documents
+
+
 def _extract_final_text(result: object) -> str:
     """Pull the final assistant message text out of an agent result state."""
     messages = result.get("messages") if isinstance(result, dict) else None
@@ -151,9 +194,12 @@ def agentic_answer_question(
 ) -> RagAnswer:
     """Answer ``question`` with the ReAct agent, returning the baseline schema.
 
-    The agent decides when/what to search; retrieved documents are captured for
-    citations so the output matches :class:`RagAnswer` exactly (answer + sources
-    + chunks), keeping the API response schema identical across modes.
+    The agent decides when/what to search; retrieved documents are captured,
+    deduplicated, and narrowed to the sources the final answer actually cites
+    (falling back to everything retrieved if the answer cites none), so the
+    citations reflect what the answer is built on rather than every passage any
+    search touched. The output matches :class:`RagAnswer` exactly (answer +
+    sources + chunks), keeping the API response schema identical across modes.
 
     Args:
         question: The user's question.
@@ -177,9 +223,8 @@ def agentic_answer_question(
     config = {"configurable": {"thread_id": thread_id or DEFAULT_THREAD_ID}}
     result = agent.invoke({"messages": [{"role": "user", "content": question}]}, config=config)
     answer_text = _extract_final_text(result)
+    chunks = _cited_documents(answer_text, _dedupe_documents(collected))
     sources = list(
-        dict.fromkeys(
-            doc.metadata.get("source") for doc in collected if doc.metadata.get("source")
-        )
+        dict.fromkeys(doc.metadata.get("source") for doc in chunks if doc.metadata.get("source"))
     )
-    return RagAnswer(answer=answer_text, sources=sources, chunks=collected)
+    return RagAnswer(answer=answer_text, sources=sources, chunks=chunks)
