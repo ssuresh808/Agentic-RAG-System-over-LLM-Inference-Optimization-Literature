@@ -58,6 +58,19 @@ class Settings(BaseSettings):
         generation_mode: Which generation path the API uses: ``"single"`` (the
             RAGAS-measured single-shot baseline, default) or ``"agent"`` (the
             LangGraph ReAct path, behind this flag - see ADR-018).
+        rag_api_key: Shared secret required in the ``X-API-Key`` header on the
+            cost-incurring endpoints. Empty (default) disables the check, so
+            local/dev runs need no key; set it in production to block anonymous
+            ``curl`` against the public backend. See ``src/api/rate_limit.py``.
+        api_rate_limit: Sustained per-IP request cap within ``api_rate_window``.
+        api_rate_window: Sustained rate-limit window, in seconds.
+        api_burst_limit: Burst per-IP request cap within ``api_burst_window``.
+        api_burst_window: Burst rate-limit window, in seconds.
+        api_daily_budget: Hard ceiling on total cost-incurring calls per UTC day
+            across all callers; the API returns 503 once it is spent. This is the
+            financial backstop against a draining loop.
+        api_paused: Maintenance kill-switch; when True the cost-incurring
+            endpoints return 503 without doing any work.
     """
 
     model_config = SettingsConfigDict(
@@ -181,6 +194,34 @@ class Settings(BaseSettings):
     generation_mode: Literal["single", "agent"] = Field(
         default="single",
         description="Generation path: 'single' (baseline) or 'agent' (LangGraph ReAct).",
+    )
+    rag_api_key: str = Field(
+        default="",
+        description="Shared secret for the X-API-Key header; empty disables the check.",
+    )
+    api_rate_limit: int = Field(
+        default=20,
+        description="Sustained per-IP request cap within api_rate_window.",
+    )
+    api_rate_window: int = Field(
+        default=3600,
+        description="Sustained rate-limit window, in seconds.",
+    )
+    api_burst_limit: int = Field(
+        default=5,
+        description="Burst per-IP request cap within api_burst_window.",
+    )
+    api_burst_window: int = Field(
+        default=60,
+        description="Burst rate-limit window, in seconds.",
+    )
+    api_daily_budget: int = Field(
+        default=500,
+        description="Hard cap on total cost-incurring calls per UTC day (503 when spent).",
+    )
+    api_paused: bool = Field(
+        default=False,
+        description="Maintenance kill-switch: when True the paid endpoints return 503.",
     )
 
 

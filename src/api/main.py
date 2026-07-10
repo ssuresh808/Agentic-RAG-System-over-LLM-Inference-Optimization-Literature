@@ -15,6 +15,7 @@ from fastapi import Depends, FastAPI
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field
 
+from src.api.rate_limit import enforce_limits, require_api_key
 from src.config.settings import get_settings
 from src.generation.dispatch import generate_answer
 from src.generation.llm import build_llm
@@ -107,7 +108,11 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post(f"{API_PREFIX}/query", response_model=QueryResponse)
+@app.post(
+    f"{API_PREFIX}/query",
+    response_model=QueryResponse,
+    dependencies=[Depends(require_api_key), Depends(enforce_limits)],
+)
 def query(
     request: QueryRequest,
     engine: Annotated[RetrievalEngine, Depends(get_engine)],
@@ -139,7 +144,11 @@ def query(
     return QueryResponse(results=results)
 
 
-@app.post(f"{API_PREFIX}/answer", response_model=AnswerResponse)
+@app.post(
+    f"{API_PREFIX}/answer",
+    response_model=AnswerResponse,
+    dependencies=[Depends(require_api_key), Depends(enforce_limits)],
+)
 def answer(
     request: AnswerRequest,
     engine: Annotated[RetrievalEngine, Depends(get_engine)],
@@ -157,14 +166,10 @@ def answer(
         or a graceful empty response if nothing has been indexed yet.
     """
     try:
-        result = generate_answer(
-            request.text, engine=engine, llm=llm, top_k=request.top_k
-        )
+        result = generate_answer(request.text, engine=engine, llm=llm, top_k=request.top_k)
     except RuntimeError:
         logger.warning("Answer requested but index is empty; returning no answer.")
-        return AnswerResponse(
-            answer="No corpus has been indexed yet.", sources=[], results=[]
-        )
+        return AnswerResponse(answer="No corpus has been indexed yet.", sources=[], results=[])
 
     results = [
         {
