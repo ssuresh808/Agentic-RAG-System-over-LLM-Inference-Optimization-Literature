@@ -19,6 +19,10 @@ import httpx
 import streamlit as st
 
 API_URL = os.environ.get("RAG_API_URL", "http://localhost:8000")
+# Shared secret for the backend's X-API-Key guard. Held server-side here (never
+# sent to the browser), so the public demo works while direct curl is blocked.
+# Empty = the backend has auth disabled (local/dev); no header is sent.
+API_KEY = os.environ.get("RAG_API_KEY", "")
 REQUEST_TIMEOUT = 180.0
 ANALYSIS_HEIGHT = 800  # fixed height (px) of the scrollable analysis container
 _CSS = (Path(__file__).parent / "style.css").read_text(encoding="utf-8")
@@ -71,9 +75,11 @@ def _request_answer(question: str, top_k: int) -> dict:
     Raises:
         httpx.HTTPError: On connection failure or a non-2xx response.
     """
+    headers = {"X-API-Key": API_KEY} if API_KEY else {}
     response = httpx.post(
         f"{API_URL}/api/v1/answer",
         json={"text": question, "top_k": top_k},
+        headers=headers,
         timeout=httpx.Timeout(REQUEST_TIMEOUT),
     )
     response.raise_for_status()

@@ -30,6 +30,14 @@ services:
         value: agent
       - key: QDRANT_COLLECTION
         value: llm_optimization_domain
+      # Abuse protection for the paid endpoints (src/api/rate_limit.py).
+      # RAG_API_KEY is the shared secret the frontend must send; enter the SAME
+      # value here and on rag-frontend below. API_DAILY_BUDGET caps total
+      # cost-incurring calls per UTC day - the financial backstop.
+      - key: RAG_API_KEY
+        sync: false
+      - key: API_DAILY_BUDGET
+        value: "500"
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: VOYAGE_API_KEY
@@ -51,4 +59,8 @@ services:
       # After the first deploy, set this to the backend's public URL,
       # e.g. https://rag-backend.onrender.com
       - key: RAG_API_URL
+        sync: false
+      # Must match rag-backend's RAG_API_KEY: the frontend sends it server-side
+      # in the X-API-Key header so the public demo works but direct curl is 401.
+      - key: RAG_API_KEY
         sync: false
