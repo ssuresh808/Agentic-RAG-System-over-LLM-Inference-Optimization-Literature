@@ -173,6 +173,36 @@ def _cited_documents(answer: str, documents: list[Document]) -> list[Document]:
     return cited or documents
 
 
+def _cap_to_top_k(documents: list[Document], top_k: int) -> list[Document]:
+    """Keep at most ``top_k`` chunks, taking one chunk per source before extras.
+
+    A multi-search run collects up to ``searches x top_k`` chunks, so the
+    citations must be re-bounded by the caller's ``top_k`` to honour the same
+    contract the single-shot path meets. Ranking one chunk per distinct source
+    first guarantees every source survives the cap whenever the answer cites at
+    most ``top_k`` of them; remaining slots are filled with further chunks in
+    retrieval order.
+
+    Args:
+        documents: Deduplicated, citation-filtered chunks in retrieval order.
+        top_k: Maximum number of chunks (and therefore sources) to return.
+
+    Returns:
+        At most ``top_k`` chunks, distinct sources first.
+    """
+    first_per_source: list[Document] = []
+    extras: list[Document] = []
+    seen: set[str] = set()
+    for doc in documents:
+        source = str(doc.metadata.get("source"))
+        if source in seen:
+            extras.append(doc)
+            continue
+        seen.add(source)
+        first_per_source.append(doc)
+    return (first_per_source + extras)[:top_k]
+
+
 def _extract_final_text(result: object) -> str:
     """Pull the final assistant message text out of an agent result state."""
     messages = result.get("messages") if isinstance(result, dict) else None
@@ -195,17 +225,19 @@ def agentic_answer_question(
     """Answer ``question`` with the ReAct agent, returning the baseline schema.
 
     The agent decides when/what to search; retrieved documents are captured,
-    deduplicated, and narrowed to the sources the final answer actually cites
-    (falling back to everything retrieved if the answer cites none), so the
-    citations reflect what the answer is built on rather than every passage any
-    search touched. The output matches :class:`RagAnswer` exactly (answer +
-    sources + chunks), keeping the API response schema identical across modes.
+    deduplicated, narrowed to the sources the final answer actually cites
+    (falling back to everything retrieved if the answer cites none), and then
+    capped at ``top_k`` chunks, so a multi-search run never returns more
+    citations than the caller asked for. The output matches :class:`RagAnswer`
+    exactly (answer + sources + chunks), keeping the API response schema
+    identical across modes.
 
     Args:
         question: The user's question.
         engine: Retrieval engine. Defaults to ``build_engine()``.
         agent: Pre-built agent (injected in tests). Defaults to a fresh agent.
-        top_k: Passages per tool call.
+        top_k: Passages per tool call, and the ceiling on returned chunks and
+            sources regardless of how many searches the agent runs.
         settings: Configuration. Defaults to ``get_settings()``.
         thread_id: Checkpointer thread id. Defaults to ``DEFAULT_THREAD_ID``;
             pass a per-conversation id to isolate agent memory across callers.
@@ -223,7 +255,7 @@ def agentic_answer_question(
     config = {"configurable": {"thread_id": thread_id or DEFAULT_THREAD_ID}}
     result = agent.invoke({"messages": [{"role": "user", "content": question}]}, config=config)
     answer_text = _extract_final_text(result)
-    chunks = _cited_documents(answer_text, _dedupe_documents(collected))
+    chunks = _cap_to_top_k(_cited_documents(answer_text, _dedupe_documents(collected)), top_k)
     sources = list(
         dict.fromkeys(doc.metadata.get("source") for doc in chunks if doc.metadata.get("source"))
     )
