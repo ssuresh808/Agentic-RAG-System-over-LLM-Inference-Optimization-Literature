@@ -171,6 +171,87 @@ def test_agentic_citations_match_bare_arxiv_ids(monkeypatch):
     assert out.sources == ["arxiv:2601.12345"]
 
 
+class _ScriptedEngine:
+    """Engine stand-in returning fixed passages per query.
+
+    Lets a test script exactly what each search-tool call retrieves, so the
+    multi-search citation logic is exercised deterministically.
+    """
+
+    def __init__(self, responses: dict[str, list[Document]]):
+        self._responses = responses
+
+    def query(self, text: str, top_k: int = 5) -> list[Document]:
+        return self._responses[text][:top_k]
+
+
+def _doc(source: str, text: str) -> Document:
+    return Document(page_content=text, metadata={"source": source})
+
+
+def test_agentic_chunks_and_sources_never_exceed_top_k_when_answer_cites_nothing(monkeypatch):
+    # Two searches x top_k=2 collect four distinct papers; the answer cites none,
+    # so the fallback must still honour the caller's top_k.
+    engine = _ScriptedEngine(
+        {
+            "batching": [_doc("arxiv:2601.00001", "a"), _doc("arxiv:2601.00002", "b")],
+            "quantization": [_doc("arxiv:2601.00003", "c"), _doc("arxiv:2601.00004", "d")],
+        }
+    )
+    _patch_agent(
+        monkeypatch,
+        queries=["batching", "quantization"],
+        answer="The corpus does not cover this topic.",
+    )
+    out = agentic_answer_question("q", engine=engine, top_k=2)
+
+    assert len(out.chunks) <= 2
+    assert len(out.sources) <= 2
+
+
+def test_agentic_sources_capped_at_top_k_when_answer_cites_more(monkeypatch):
+    # The answer cites all four retrieved papers, but the caller asked for two.
+    engine = _ScriptedEngine(
+        {
+            "batching": [_doc("arxiv:2601.00001", "a"), _doc("arxiv:2601.00002", "b")],
+            "quantization": [_doc("arxiv:2601.00003", "c"), _doc("arxiv:2601.00004", "d")],
+        }
+    )
+    _patch_agent(
+        monkeypatch,
+        queries=["batching", "quantization"],
+        answer="See arxiv:2601.00001, arxiv:2601.00002, arxiv:2601.00003 and arxiv:2601.00004.",
+    )
+    out = agentic_answer_question("q", engine=engine, top_k=2)
+
+    assert out.sources == ["arxiv:2601.00001", "arxiv:2601.00002"]  # retrieval order
+    assert len(out.chunks) <= 2
+
+
+def test_agentic_cap_keeps_one_chunk_per_cited_source_before_extras(monkeypatch):
+    # Paper 00001 contributes two chunks. Capping the first top_k=3 chunks naively
+    # would drop paper 00003 even though the answer cites it and three papers fit.
+    engine = _ScriptedEngine(
+        {
+            "kv cache": [
+                _doc("arxiv:2601.00001", "a1"),
+                _doc("arxiv:2601.00001", "a2"),
+                _doc("arxiv:2601.00002", "b"),
+            ],
+            "speculative": [_doc("arxiv:2601.00003", "c")],
+        }
+    )
+    _patch_agent(
+        monkeypatch,
+        queries=["kv cache", "speculative"],
+        answer="Uses arxiv:2601.00001, arxiv:2601.00002 and arxiv:2601.00003.",
+    )
+    out = agentic_answer_question("q", engine=engine, top_k=3)
+
+    assert out.sources == ["arxiv:2601.00001", "arxiv:2601.00002", "arxiv:2601.00003"]
+    assert len(out.chunks) == 3
+
+
 def test_read_agent_skill_loads_known_skill():
     out = read_agent_skill.invoke({"skill_name": "critical_analysis"})
     assert "critical analysis" in out.lower()
