@@ -24,3 +24,6 @@ DESIGN.md
 .impeccable/
 skills-lock.json
 .github/skills/
+
+# Private evaluation sets and run outputs (progress checks, never published)
+data/eval/local/
