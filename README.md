@@ -146,9 +146,19 @@ uv run pytest -q              # full test suite (offline; external calls mocked)
 Evaluation and tracking:
 
 ```bash
-uv run python -m scripts.run_ragas_sample                      # local RAGAS metrics
-ENABLE_WANDB=true uv run python -m scripts.run_ragas_sample    # log to Weights & Biases
+uv run python -m scripts.run_ragas_sample --run-name single_k5        # score the single-shot path
+uv run python -m scripts.run_ragas_sample --mode agent --run-name agent_k5   # score the agent path
+RAGAS_JUDGE_PROVIDER=anthropic uv run python -m scripts.run_ragas_sample \
+    --rescore data/eval/local/runs/single_k5.json                     # re-judge saved answers
+ENABLE_WANDB=true uv run python -m scripts.run_ragas_sample           # log to Weights & Biases
 ```
+
+The eval reads a private question set (`EVAL_QUESTIONS_PATH`, git-ignored, any
+JSON list of `{id, topic, question}`), answers through whichever
+`GENERATION_MODE` is configured, scores faithfulness, answer relevancy, and
+reference-free context precision (`RAGAS_METRICS`), and saves every run with
+its config and per-question scores. Generation and judging are separate stages,
+so a hosted judge can re-score cached answers without regenerating them.
 
 ---
 

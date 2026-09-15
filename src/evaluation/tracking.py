@@ -32,13 +32,18 @@ def _is_nan(value: object) -> bool:
     return value is None or (isinstance(value, float) and math.isnan(value))
 
 
-def summarize_result(result: object, questions: list[str]) -> tuple[dict, list[dict]]:
+def summarize_result(
+    result: object,
+    questions: list[str],
+    metric_names: tuple[str, ...] = METRIC_NAMES,
+) -> tuple[dict, list[dict]]:
     """Reduce an evaluation result to aggregate scores + per-failure rows.
 
     Args:
         result: Either the NaN-fallback dict from ``evaluate_generation`` or a
             RAGAS result exposing ``to_pandas()``.
         questions: The questions evaluated (used for the dict/total-failure case).
+        metric_names: Metrics to summarise (defaults to the two Phase-2c metrics).
 
     Returns:
         ``(scores, failures)`` where ``scores`` maps each metric to its mean over
@@ -46,7 +51,7 @@ def summarize_result(result: object, questions: list[str]) -> tuple[dict, list[d
         could not be scored.
     """
     if isinstance(result, dict):
-        scores = {name: result.get(name, float("nan")) for name in METRIC_NAMES}
+        scores = {name: result.get(name, float("nan")) for name in metric_names}
         raw = str(result.get("error", ""))
         failures = [
             {
@@ -61,13 +66,14 @@ def summarize_result(result: object, questions: list[str]) -> tuple[dict, list[d
 
     frame = result.to_pandas()
     scores = {}
-    for name in METRIC_NAMES:
-        valid = [value for value in frame[name].tolist() if not _is_nan(value)]
+    for name in metric_names:
+        column = frame[name].tolist() if name in frame.columns else []
+        valid = [value for value in column if not _is_nan(value)]
         scores[name] = float(sum(valid) / len(valid)) if valid else float("nan")
 
     failures = []
     for record in frame.to_dict(orient="records"):
-        for name in METRIC_NAMES:
+        for name in metric_names:
             if _is_nan(record.get(name)):
                 failures.append(
                     {

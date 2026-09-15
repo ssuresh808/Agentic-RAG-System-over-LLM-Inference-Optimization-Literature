@@ -52,6 +52,14 @@ class Settings(BaseSettings):
         arxiv_max_docs: Fail-safe cap on documents pulled from the arXiv stream.
         ragas_judge_provider: LLM provider for the RAGAS judge (ollama/openai/anthropic).
         ragas_judge_model: Model id for the RAGAS judge; empty = use llm_model.
+        ragas_judge_json_mode: Force JSON output from an Ollama judge so RAGAS's
+            structured prompts parse reliably (fewer NaN scores). Ignored for
+            hosted judges, which already follow JSON instructions.
+        ragas_metrics: Comma-separated RAGAS metrics to score; see
+            ``src/evaluation/ragas_eval.py`` for the supported names.
+        eval_questions_path: JSON list of ``{id, topic, question}`` items used as
+            the generation-eval question set. Kept private (git-ignored) so the
+            demo is never tuned to a published question list.
         enable_wandb: When True, log evaluation runs to Weights & Biases.
         wandb_project: Weights & Biases project name.
         wandb_entity: Weights & Biases entity (team/user); empty = default account.
@@ -178,6 +186,18 @@ class Settings(BaseSettings):
     ragas_judge_model: str = Field(
         default="",
         description="Model id for the RAGAS judge; empty = fall back to llm_model.",
+    )
+    ragas_judge_json_mode: bool = Field(
+        default=True,
+        description="Force JSON output from an Ollama judge (fewer RAGAS parse failures).",
+    )
+    ragas_metrics: str = Field(
+        default="faithfulness,answer_relevancy,context_precision",
+        description="Comma-separated RAGAS metrics to score.",
+    )
+    eval_questions_path: str = Field(
+        default="data/eval/local/generation_questions.json",
+        description="Private JSON question set for the generation eval (git-ignored).",
     )
     enable_wandb: bool = Field(
         default=False,
